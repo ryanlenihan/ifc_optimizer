@@ -1,2 +1,4 @@
+pyside6>=6.0
 ifcopenshell
-PySide6
+git+https://github.com/IfcOpenShell/IfcOpenShell.git#subdirectory=src/ifcpatch
+
