@@ -1,0 +1,2 @@
+ifcopenshell
+PySide6
