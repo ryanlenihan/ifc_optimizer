@@ -1,7 +1,9 @@
 import sys
 import os
 import traceback
-from collections import OrderedDict  
+from collections import OrderedDict
+from pathlib import Path
+
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QLineEdit, QPushButton, QCheckBox,
@@ -147,18 +149,19 @@ class IFCOptimizerGUI(QWidget):
             try:
                 options['remove_small_elements'] = float(options['remove_small_elements'])
             except ValueError:
-                QMessageBox.warning(self, "Invalid Input",
-                                    "Please enter a valid number for minimum volume.")
+                QMessageBox.warning(self, "Invalid Input", "Please enter a valid number for minimum volume.")
                 return
 
         if 'lossy_rounding' in options:
             try:
                 options['lossy_rounding'] = int(options['lossy_rounding'])
             except ValueError:
-                QMessageBox.warning(self, "Invalid Input",
-                                    "Please enter a whole number for CartesianPoint precision.")
+                QMessageBox.warning(self, "Invalid Input", "Please enter a whole number for CartesianPoint precision.")
                 return
 
+        # Remember for reporting below
+        self._last_options = options
+        self._last_output = output_file
 
         # Show progress dialog
         self.progress = QProgressDialog("Optimizing IFC file...", None, 0, 0, self)
@@ -171,6 +174,7 @@ class IFCOptimizerGUI(QWidget):
         self.thread = OptimizerThread(input_file, output_file, options)
         self.thread.finished.connect(self.on_optimization_finished)
         self.thread.start()
+
 
     def create_file_inputs(self):
         """Create file input/output widgets"""
@@ -311,27 +315,35 @@ class IFCOptimizerGUI(QWidget):
         
         if error:
             QMessageBox.critical(self, "Error", f"An error occurred:\n{error}")
-        else:
-            # Build stats message
-            stats_text = "Optimization removed:\n"
-            for key, value in stats.items():
-                stats_text += f"- {value} {key.replace('_', ' ')}\n"
-            
-            # Get file sizes
-            input_size = os.path.getsize(self.input_line.text()) / (1024 * 1024)
-            output_size = os.path.getsize(output_file) / (1024 * 1024)
-            reduction = input_size - output_size
-            percentage = (1 - output_size/input_size) * 100
-            
-            message = (
-                f"Optimized file saved to:\n{output_file}\n\n"
-                f"Original size: {input_size:.2f} MB\n"
-                f"Optimized size: {output_size:.2f} MB\n"
-                f"Size reduction: {reduction:.2f} MB ({percentage:.2f}%)\n\n"
-                f"{stats_text}"
-            )
-            
-            QMessageBox.information(self, "Success", message)
+            return
+
+        # Decide which file to report size on: .ifc or .ifczip
+        out_path = output_file
+        if getattr(self, "_last_options", {}).get("ifczip_compress", False):
+            # assume .ifczip sits alongside the .ifc
+            out_path = Path(output_file).with_suffix(".ifczip").as_posix()
+
+        # Build stats message
+        stats_text = "Optimization removed:\n"
+        for key, value in stats.items():
+            stats_text += f"- {value} {key.replace('_', ' ')}\n"
+        
+        # Get file sizes
+        input_size = os.path.getsize(self.input_line.text()) / (1024 * 1024)
+        output_size = os.path.getsize(out_path) / (1024 * 1024)
+        reduction = input_size - output_size
+        percentage = (1 - output_size / input_size) * 100
+        
+        message = (
+            f"Optimized file saved to:\n{out_path}\n\n"
+            f"Original size: {input_size:.2f} MB\n"
+            f"Optimized size: {output_size:.2f} MB\n"
+            f"Size reduction: {reduction:.2f} MB ({percentage:.2f}%)\n\n"
+            f"{stats_text}"
+        )
+        
+        QMessageBox.information(self, "Success", message)
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
