@@ -19,6 +19,8 @@ import ifcpatch
 from ifcopenshell.util import shape
 from ifcopenshell.util.element import replace_attribute
 
+from zipfile import ZipFile, ZIP_DEFLATED
+from pathlib import Path
 
 # ----------------------------------------------------------------------
 # Text level helpers
@@ -100,11 +102,6 @@ def model_level_dedupe(model, entity_type: str) -> int:
 
     return len(dupes)
 
-def write_ifczip(src_ifc: str, dst_ifczip: str) -> None:
-    """Write ``src_ifc`` into a gzipped ``.ifczip`` container."""
-
-    with open(src_ifc, "rb") as fin, gzip.open(dst_ifczip, "wb") as fout:
-        shutil.copyfileobj(fin, fout)
 
 # -----------------------------------------------------------------------
 
@@ -191,8 +188,12 @@ def optimize_ifc(input_path: str, output_path: str, options: dict | None = None)
 
         # 5. Write results ----------------------------------------------
         model.write(output_path)
-        if options.get("ifczip_compress"):
-            write_ifczip(output_path, output_path + ".ifczip")
+
+        # optional: also spit out a .ifczip container
+        if options.get("ifczip_compress", False):
+            dst = output_path.rstrip(".ifc") + ".ifczip"
+            write_ifczip(output_path, dst)
+            print(f"→ wrote IFCZIP to {dst}")
 
         # 6. Housekeeping ----------------------------------------------
         for f in tmp_files:
@@ -461,6 +462,19 @@ def main() -> None:
     for key, value in stats.items():
         print(f"{key}: {value}")
 
+def write_ifczip(src_ifc: str, dst_ifczip: str) -> None:
+    """
+    Package a single IFC file into an .ifczip package (zip-deflated,
+    containing exactly one entry named like the IFC itself).
+    """
+    # ensure output folder exists
+    os.makedirs(os.path.dirname(dst_ifczip), exist_ok=True)
+    # build the zip
+    with ZipFile(dst_ifczip, 'w', compression=ZIP_DEFLATED, compresslevel=9) as z:
+        arc = os.path.basename(src_ifc)
+        z.write(src_ifc, arcname=arc)
+    # (optional) remove the .ifc if you only need the .ifczip
+    # os.remove(src_ifc)
 
 if __name__ == "__main__":
     main()
