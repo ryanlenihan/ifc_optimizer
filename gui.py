@@ -1,6 +1,8 @@
 import sys
 import os
 import traceback
+from collections import OrderedDict  
+
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QLineEdit, QPushButton, QCheckBox,
     QFileDialog, QVBoxLayout, QHBoxLayout, QMessageBox, 
@@ -35,18 +37,34 @@ class IFCOptimizerGUI(QWidget):
         self.setMinimumWidth(600)
 
         # Define optimization options FIRST
-        self.optimization_options = {
-            'remove_unused_spaces': ('Remove Unused Spaces', None),
-            'remove_metadata': ('Remove Metadata', None),
-            'remove_empty_attributes': ('Remove Empty Attributes', None),
-            'remove_unused_property_sets': ('Remove Unused Property Sets', None),
-            'remove_unused_materials': ('Remove Unused Materials', None),
-            'remove_unused_classifications': ('Remove Classifications', None),
-            'remove_small_elements': ('Remove Small Elements (m³)', QLineEdit("0.001")),
-            'remove_orphaned_entities': ('Remove Orphaned Entities', None),
-            'deduplicate_geometry': ('Deduplicate Geometry', None),
-            'flatten_spatial_structure': ('Flatten Spatial Structure', None)
-        }
+        self.optimization_groups = OrderedDict({
+            "Geometry / File size": {
+                'remove_small_elements': ('Remove small elements (m³)', QLineEdit("0.001")),
+                'lossy_rounding':        ('Round CartesianPoints (digits)', QLineEdit("2")),
+                'deduplicate_geometry':  ('Deduplicate geometry', None),
+                'merge_cartesian':       ('Merge duplicate CartesianPoints', None),
+            },
+            "Data clean-up": {
+                'remove_metadata':            ('Remove metadata', None),
+                'remove_empty_attributes':    ('Remove empty attributes', None),
+                'remove_dash_props':          ('Remove “-” placeholder properties', None),
+            },
+            "Unused objects": {
+                'remove_unused_spaces':          ('Remove unused spaces', None),
+                'remove_unused_property_sets':   ('Remove unused property sets', None),
+                'remove_unused_materials':       ('Remove unused materials', None),
+                'remove_unused_classifications': ('Remove unused classifications', None),
+                'remove_orphaned_entities':      ('Remove orphaned entities', None),
+            },
+            "De-duplication": {
+                'dedupe_property_sets':     ('Merge duplicate PropertySets', None),
+                'dedupe_classifications':   ('Merge duplicate Classifications', None),
+            },
+            "Output": {
+                'ifczip_compress': ('Save IFCZIP copy', None),
+                'flatten_spatial_structure': ('Flatten spatial structure', None),
+            }
+        })
 
         # Create UI components
         self.create_file_inputs()
@@ -77,32 +95,32 @@ class IFCOptimizerGUI(QWidget):
         schema_layout.addWidget(self.schema_combo)
         self.schema_group.setLayout(schema_layout)
      
-    def create_optimization_settings(self):
-        """Create optimization checkboxes and parameters"""
-        self.settings_group = QGroupBox("Optimization Settings")
-        grid = QGridLayout()
+    # def create_optimization_settings(self):
+        # """Create optimization checkboxes and parameters"""
+        # self.settings_group = QGroupBox("Optimization Settings")
+        # grid = QGridLayout()
         
-        self.checkboxes = {}
-        self.param_inputs = {}
+        # self.checkboxes = {}
+        # self.param_inputs = {}
         
-        row, col = 0, 0
-        for opt, (label, widget) in self.optimization_options.items():
-            cb = QCheckBox(label)
-            self.checkboxes[opt] = cb
-            grid.addWidget(cb, row, col)
+        # row, col = 0, 0
+        # for opt, (label, widget) in self.optimization_options.items():
+            # cb = QCheckBox(label)
+            # self.checkboxes[opt] = cb
+            # grid.addWidget(cb, row, col)
             
-            if widget:
-                widget.setMaximumWidth(100)
-                self.param_inputs[opt] = widget
-                grid.addWidget(widget, row, col + 1)
-                col += 1
+            # if widget:
+                # widget.setMaximumWidth(100)
+                # self.param_inputs[opt] = widget
+                # grid.addWidget(widget, row, col + 1)
+                # col += 1
                 
-            col += 1
-            if col >= 3:
-                col = 0
-                row += 1
+            # col += 1
+            # if col >= 3:
+                # col = 0
+                # row += 1
                 
-        self.settings_group.setLayout(grid)
+        # self.settings_group.setLayout(grid)
 
     def run_optimizer(self):
         input_file = self.input_line.text()
@@ -120,7 +138,7 @@ class IFCOptimizerGUI(QWidget):
         
         # Add schema conversion options
         options.update({
-            'convert_schema': self.convert_schema_check.isChecked(),
+            'convert_schema': self.convert_checkbox.isChecked(),
             'target_schema': self.schema_combo.currentText()
         })
 
@@ -129,8 +147,18 @@ class IFCOptimizerGUI(QWidget):
             try:
                 options['remove_small_elements'] = float(options['remove_small_elements'])
             except ValueError:
-                QMessageBox.warning(self, "Invalid Input", "Please enter a valid number for minimum volume.")
+                QMessageBox.warning(self, "Invalid Input",
+                                    "Please enter a valid number for minimum volume.")
                 return
+
+        if 'lossy_rounding' in options:
+            try:
+                options['lossy_rounding'] = int(options['lossy_rounding'])
+            except ValueError:
+                QMessageBox.warning(self, "Invalid Input",
+                                    "Please enter a whole number for CartesianPoint precision.")
+                return
+
 
         # Show progress dialog
         self.progress = QProgressDialog("Optimizing IFC file...", None, 0, 0, self)
@@ -167,31 +195,39 @@ class IFCOptimizerGUI(QWidget):
         self.output_group.setLayout(output_layout)
 
     def create_optimization_settings(self):
-        """Create optimization checkboxes and parameters"""
-        self.settings_group = QGroupBox("Optimization Settings")
-        grid = QGridLayout()
-        
+        """Create group boxes for each optimisation category."""
+        self.settings_group = QGroupBox("Optimisation Settings")
+        vbox = QVBoxLayout()
+
         self.checkboxes = {}
         self.param_inputs = {}
-        
-        row, col = 0, 0
-        for opt, (label, widget) in self.optimization_options.items():
-            cb = QCheckBox(label)
-            self.checkboxes[opt] = cb
-            grid.addWidget(cb, row, col)
-            
-            if widget:
-                widget.setMaximumWidth(100)
-                self.param_inputs[opt] = widget
-                grid.addWidget(widget, row, col + 1)
+
+        for title, opts in self.optimization_groups.items():
+            grp = QGroupBox(title)
+            grid = QGridLayout()
+            row = col = 0
+            for key, (label, widget) in opts.items():
+                cb = QCheckBox(label)
+                self.checkboxes[key] = cb
+                grid.addWidget(cb, row, col)
+
+                if widget:
+                    widget.setMaximumWidth(80)
+                    widget.setEnabled(False)
+                    cb.toggled.connect(widget.setEnabled)   # enable when checked
+                    self.param_inputs[key] = widget
+                    grid.addWidget(widget, row, col + 1)
+                    col += 1
+
                 col += 1
-                
-            col += 1
-            if col >= 3:
-                col = 0
-                row += 1
-                
-        self.settings_group.setLayout(grid)
+                if col >= 4:   # four items per row looks tidy
+                    col = 0
+                    row += 1
+            grp.setLayout(grid)
+            vbox.addWidget(grp)
+
+        self.settings_group.setLayout(vbox)
+
 
     def create_optimize_button(self):
         # Optimize button
@@ -233,39 +269,39 @@ class IFCOptimizerGUI(QWidget):
         if file_name:
             self.output_line.setText(file_name)
 
-    def run_optimizer(self):
-        input_file = self.input_line.text()
-        output_file = self.output_line.text()
+    # def run_optimizer(self):
+        # input_file = self.input_line.text()
+        # output_file = self.output_line.text()
         
-        if not input_file or not output_file:
-            QMessageBox.warning(self, "Missing Information", "Please select both input and output files.")
-            return
+        # if not input_file or not output_file:
+            # QMessageBox.warning(self, "Missing Information", "Please select both input and output files.")
+            # return
 
-        # Gather selected options and parameters
-        options = {
-            opt: self.param_inputs[opt].text() if opt in self.param_inputs else True
-            for opt, cb in self.checkboxes.items() if cb.isChecked()
-        }
+        # # Gather selected options and parameters
+        # options = {
+            # opt: self.param_inputs[opt].text() if opt in self.param_inputs else True
+            # for opt, cb in self.checkboxes.items() if cb.isChecked()
+        # }
 
-        # Validate numerical parameters
-        if 'remove_small_elements' in options:
-            try:
-                options['remove_small_elements'] = float(options['remove_small_elements'])
-            except ValueError:
-                QMessageBox.warning(self, "Invalid Input", "Please enter a valid number for minimum volume.")
-                return
+        # # Validate numerical parameters
+        # if 'remove_small_elements' in options:
+            # try:
+                # options['remove_small_elements'] = float(options['remove_small_elements'])
+            # except ValueError:
+                # QMessageBox.warning(self, "Invalid Input", "Please enter a valid number for minimum volume.")
+                # return
 
-        # Show progress dialog
-        self.progress = QProgressDialog("Optimizing IFC file...", None, 0, 0, self)
-        self.progress.setWindowTitle("Please Wait")
-        self.progress.setMinimumDuration(0)
-        self.progress.setWindowModality(Qt.ApplicationModal)
-        self.progress.show()
+        # # Show progress dialog
+        # self.progress = QProgressDialog("Optimizing IFC file...", None, 0, 0, self)
+        # self.progress.setWindowTitle("Please Wait")
+        # self.progress.setMinimumDuration(0)
+        # self.progress.setWindowModality(Qt.ApplicationModal)
+        # self.progress.show()
 
-        # Start optimization thread
-        self.thread = OptimizerThread(input_file, output_file, options)
-        self.thread.finished.connect(self.on_optimization_finished)
-        self.thread.start()
+        # # Start optimization thread
+        # self.thread = OptimizerThread(input_file, output_file, options)
+        # self.thread.finished.connect(self.on_optimization_finished)
+        # self.thread.start()
 
     def on_optimization_finished(self, error, output_file, stats):
         if self.progress:
