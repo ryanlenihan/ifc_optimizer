@@ -1,29 +1,53 @@
-import sys
+"""Graphical user interface for the IFC optimizer."""
+
+from __future__ import annotations
+
 import os
+import sys
 import traceback
 from collections import OrderedDict
 from pathlib import Path
 
-
-from PySide6.QtWidgets import (
-    QApplication, QWidget, QLabel, QLineEdit, QPushButton, QCheckBox,
-    QFileDialog, QVBoxLayout, QHBoxLayout, QMessageBox, 
-    QProgressDialog, QGroupBox, QGridLayout, QComboBox
-)
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QProgressDialog,
+    QCheckBox,
+    QVBoxLayout,
+    QWidget,
+    QComboBox,
+)
+
 from src.optimizer import optimize_ifc
 
+# Path to the application icon used in the title bar and task switcher
+ICON_PATH = Path(__file__).with_name("axisverde.ico")
+
 class OptimizerThread(QThread):
-    finished = Signal(object, object, dict)  # (error, output_file, stats)
+    """Run ``optimize_ifc`` in a background thread."""
+
+    #: Signal emitted when the job completes: ``(error, output_file, stats)``.
+    finished = Signal(object, object, dict)
     
     def __init__(self, input_file, output_file, options):
+        """Store parameters for the optimisation job."""
+
         super().__init__()
         self.input_file = input_file
         self.output_file = output_file
         self.options = options
 
     def run(self):
+        """Execute the optimisation function and emit the result."""
+
         try:
             stats = optimize_ifc(self.input_file, self.output_file, self.options)
             self.finished.emit(None, self.output_file, stats)
@@ -32,13 +56,17 @@ class OptimizerThread(QThread):
             self.finished.emit(str(e), self.output_file, {})
 
 class IFCOptimizerGUI(QWidget):
+    """Main window providing controls for IFC optimisation."""
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("IFC Optimizer")
-        self.setWindowIcon(QIcon("C:\\Codes\\ifc_optimizer\\axisverde.ico"))
+        self.setWindowIcon(QIcon(str(ICON_PATH)))
         self.setMinimumWidth(600)
 
-        # Define optimization options FIRST
+        # Available optimisation options grouped by category.  Each entry maps
+        # a key used by ``optimize_ifc`` to a label and optional input widget
+        # for additional parameters.
         self.optimization_groups = OrderedDict({
             "Geometry / File size": {
                 'remove_small_elements': ('Remove small elements (m³)', QLineEdit("0.001")),
@@ -87,7 +115,7 @@ class IFCOptimizerGUI(QWidget):
         self.thread = None
 
     def create_schema_conversion(self):
-        """Create schema conversion UI elements"""
+        """Create widgets for optional schema conversion."""
         self.schema_group = QGroupBox("Schema Conversion")
         schema_layout = QHBoxLayout()
         self.convert_checkbox = QCheckBox("Convert to:")
@@ -97,34 +125,9 @@ class IFCOptimizerGUI(QWidget):
         schema_layout.addWidget(self.schema_combo)
         self.schema_group.setLayout(schema_layout)
      
-    # def create_optimization_settings(self):
-        # """Create optimization checkboxes and parameters"""
-        # self.settings_group = QGroupBox("Optimization Settings")
-        # grid = QGridLayout()
-        
-        # self.checkboxes = {}
-        # self.param_inputs = {}
-        
-        # row, col = 0, 0
-        # for opt, (label, widget) in self.optimization_options.items():
-            # cb = QCheckBox(label)
-            # self.checkboxes[opt] = cb
-            # grid.addWidget(cb, row, col)
-            
-            # if widget:
-                # widget.setMaximumWidth(100)
-                # self.param_inputs[opt] = widget
-                # grid.addWidget(widget, row, col + 1)
-                # col += 1
-                
-            # col += 1
-            # if col >= 3:
-                # col = 0
-                # row += 1
-                
-        # self.settings_group.setLayout(grid)
 
     def run_optimizer(self):
+        """Validate input and start the optimisation process in a thread."""
         input_file = self.input_line.text()
         output_file = self.output_line.text()
         
@@ -177,7 +180,7 @@ class IFCOptimizerGUI(QWidget):
 
 
     def create_file_inputs(self):
-        """Create file input/output widgets"""
+        """Create widgets for selecting input and output files."""
         # Input file section
         self.input_group = QGroupBox("Input File")
         input_layout = QHBoxLayout()
@@ -199,7 +202,7 @@ class IFCOptimizerGUI(QWidget):
         self.output_group.setLayout(output_layout)
 
     def create_optimization_settings(self):
-        """Create group boxes for each optimisation category."""
+        """Create checkboxes and parameter fields for all optimisation options."""
         self.settings_group = QGroupBox("Optimisation Settings")
         vbox = QVBoxLayout()
 
@@ -234,7 +237,8 @@ class IFCOptimizerGUI(QWidget):
 
 
     def create_optimize_button(self):
-        # Optimize button
+        """Create the start button used to launch the optimisation."""
+
         self.optimize_btn = QPushButton("Optimize")
         self.optimize_btn.setFixedSize(100, 32)
         self.optimize_btn.setStyleSheet("""
@@ -258,56 +262,30 @@ class IFCOptimizerGUI(QWidget):
         self.button_layout.addStretch(1)
 
     def browse_input(self):
+        """Prompt the user for an input IFC file."""
         file_name, _ = QFileDialog.getOpenFileName(
             self, "Select IFC file", "", "IFC Files (*.ifc);;All Files (*)"
         )
         if file_name:
             self.input_line.setText(file_name)
-            base = os.path.basename(file_name)
-            self.output_line.setText(os.path.join(os.path.dirname(file_name), f"optimized_{base}"))
+            base = Path(file_name).name
+            default = Path(file_name).with_name(f"optimized_{base}")
+            self.output_line.setText(default.as_posix())
 
     def browse_output(self):
+        """Prompt the user for the destination IFC file."""
         file_name, _ = QFileDialog.getSaveFileName(
-            self, "Save Optimized IFC As", self.output_line.text() or "", "IFC Files (*.ifc);;All Files (*)"
+            self,
+            "Save Optimized IFC As",
+            self.output_line.text() or "",
+            "IFC Files (*.ifc);;All Files (*)",
         )
         if file_name:
-            self.output_line.setText(file_name)
+            self.output_line.setText(Path(file_name).as_posix())
 
-    # def run_optimizer(self):
-        # input_file = self.input_line.text()
-        # output_file = self.output_line.text()
-        
-        # if not input_file or not output_file:
-            # QMessageBox.warning(self, "Missing Information", "Please select both input and output files.")
-            # return
-
-        # # Gather selected options and parameters
-        # options = {
-            # opt: self.param_inputs[opt].text() if opt in self.param_inputs else True
-            # for opt, cb in self.checkboxes.items() if cb.isChecked()
-        # }
-
-        # # Validate numerical parameters
-        # if 'remove_small_elements' in options:
-            # try:
-                # options['remove_small_elements'] = float(options['remove_small_elements'])
-            # except ValueError:
-                # QMessageBox.warning(self, "Invalid Input", "Please enter a valid number for minimum volume.")
-                # return
-
-        # # Show progress dialog
-        # self.progress = QProgressDialog("Optimizing IFC file...", None, 0, 0, self)
-        # self.progress.setWindowTitle("Please Wait")
-        # self.progress.setMinimumDuration(0)
-        # self.progress.setWindowModality(Qt.ApplicationModal)
-        # self.progress.show()
-
-        # # Start optimization thread
-        # self.thread = OptimizerThread(input_file, output_file, options)
-        # self.thread.finished.connect(self.on_optimization_finished)
-        # self.thread.start()
 
     def on_optimization_finished(self, error, output_file, stats):
+        """Handle completion of the optimisation thread."""
         if self.progress:
             self.progress.close()
             self.progress.deleteLater()
@@ -347,7 +325,7 @@ class IFCOptimizerGUI(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setWindowIcon(QIcon("C:\\Codes\\ifc_optimizer\\axisverde.ico"))
+    app.setWindowIcon(QIcon(str(ICON_PATH)))
     window = IFCOptimizerGUI()
     window.show()
     sys.exit(app.exec())
